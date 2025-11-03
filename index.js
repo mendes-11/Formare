@@ -43,11 +43,10 @@ client.on('ready', () => {
 
 client.on('message', async msg => {
   try {
-    // Simula req/res para chamar o controller
     const req = {
       body: {
-        phone: msg.from,   // número do WhatsApp
-        message: msg.body  // texto enviado
+        phone: msg.from,   
+        message: msg.body  
       }
     };
 
@@ -55,7 +54,6 @@ client.on('message', async msg => {
       status: (code) => ({
         json: (obj) => {
           console.log("Resposta do bot:", obj);
-          // envia a resposta para o WhatsApp
           client.sendMessage(msg.from, obj.message);
         },
         send: (obj) => {
@@ -65,7 +63,6 @@ client.on('message', async msg => {
       })
     };
 
-    // Chama o método do controller
     await WhatsAppController.receiveMessage(req, res);
 
   } catch (err) {
