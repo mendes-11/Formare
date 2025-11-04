@@ -1,4 +1,7 @@
 const Conversation = require("../model/conversation");
+const Quadra = require("../model/quadra");
+const Quadra = require("../model/");
+
 
 const WhatsAppController = {
   async receiveMessage(req, res) {
@@ -14,22 +17,17 @@ const WhatsAppController = {
       if (!conversation) {
         conversation = await Conversation.create({
           phone: normalizedPhone,
-          step: "waiting_user_info"
-        });
-
-        // Salva a mensagem inicial do usuário
-        await Conversation.create({
-          phone: normalizedPhone,
           message: msg,
           sender: "user",
           step: "waiting_user_info"
         });
-
+      
         return res.status(200).json({
           message:
             "Olá! 😃 Antes de começarmos, por favor, envie suas informações neste formato:\n\n👉 Nome - EDV(8 números) - Setor\n\nExemplo:\nRenato - 90902712 - Manutenção"
         });
       }
+      
 
       // Salva a mensagem do usuário
       await Conversation.create({
@@ -114,25 +112,74 @@ const WhatsAppController = {
         });
       }
 
-      // Reserva de quadra
       if (conversation.step === "quadra_tipo") {
-        if (msg === "1") {
+        if (msg === "1" || msg === "2") {
+          const tipoQuadra = msg === "1" ? "Sintético" : "Futsal";
+          conversation.step = "selecionar_horario";
+          conversation.tipoQuadra = tipoQuadra;
+          await conversation.save();
+      
+          // Busca horários disponíveis
+          const quadra = await Quadra.findOne({ nome: tipoQuadra });
+          if (!quadra) {
+            return res.status(404).json({
+              message: "⚠️ Nenhuma quadra desse tipo foi encontrada."
+            });
+          }
+      
+          const horarios = await Horario.find({ quadraId: quadra._id, disponivel: true });
+      
+          if (horarios.length === 0) {
+            return res.status(200).json({
+              message: "⚠️ Nenhum horário disponível para essa quadra hoje."
+            });
+          }
+      
+          const lista = horarios.map((h, i) => `${i + 1} - ${h.hora}`).join("\n");
+      
           return res.status(200).json({
-            message:
-              "✅ Quadra sintética selecionada!\n\nDigite 'finalizar' para encerrar ou 'voltar' para o menu anterior."
+            message: `Horários disponíveis para a quadra ${tipoQuadra}:\n\n${lista}\n\nEscolha um número para confirmar.`
           });
         }
-
-        if (msg === "2") {
-          return res.status(200).json({
-            message:
-              "✅ Quadra de futsal selecionada!\n\nDigite 'finalizar' para encerrar ou 'voltar' para o menu anterior."
-          });
-        }
-
+      
         return res.status(200).json({
-          message:
-            "⚠️ Opção inválida. Escolha:\n\n1 - Sintético\n2 - Futsal\n\nOu digite 'voltar'."
+          message: "⚠️ Opção inválida. Escolha:\n\n1 - Sintético\n2 - Futsal\n\nOu digite 'voltar'."
+        });
+      }
+      
+      // Seleção do horário e criação da reserva
+      if (conversation.step === "selecionar_horario") {
+        const tipoQuadra = conversation.tipoQuadra;
+        const quadra = await Quadra.findOne({ nome: tipoQuadra });
+        const horarios = await Horario.find({ quadraId: quadra._id, disponivel: true });
+      
+        const escolha = parseInt(msg) - 1;
+        if (isNaN(escolha) || !horarios[escolha]) {
+          return res.status(200).json({
+            message: "⚠️ Escolha inválida. Envie o número do horário disponível."
+          });
+        }
+      
+        const horarioEscolhido = horarios[escolha];
+      
+        // Cria reserva
+        await Reserva.create({
+          nomeCliente: conversation.userInfo.name,
+          telefone: conversation.phone,
+          quadraId: quadra._id,
+          horarioId: horarioEscolhido._id,
+          dataReserva: new Date().toISOString().split("T")[0]
+        });
+      
+        // Marca horário como reservado
+        horarioEscolhido.disponivel = false;
+        await horarioEscolhido.save();
+      
+        conversation.step = "menu_principal";
+        await conversation.save();
+      
+        return res.status(200).json({
+          message: `✅ Reserva confirmada para ${tipoQuadra} às ${horarioEscolhido.hora}!\n\nDigite 'voltar' para o menu principal ou 'finalizar' para encerrar.`
         });
       }
 

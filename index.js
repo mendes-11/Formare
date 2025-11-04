@@ -45,8 +45,8 @@ client.on('message', async msg => {
   try {
     const req = {
       body: {
-        phone: msg.from,   
-        message: msg.body  
+        phone: msg.from,
+        message: msg.body
       }
     };
 
@@ -54,11 +54,19 @@ client.on('message', async msg => {
       status: (code) => ({
         json: (obj) => {
           console.log("Resposta do bot:", obj);
-          client.sendMessage(msg.from, obj.message);
+          try {
+            client.sendMessage(msg.from, obj.message || "Sem mensagem de retorno.");
+          } catch (sendErr) {
+            console.error("Erro ao enviar mensagem:", sendErr);
+          }
         },
         send: (obj) => {
           console.log("Resposta do bot:", obj);
-          client.sendMessage(msg.from, obj.message);
+          try {
+            client.sendMessage(msg.from, obj.message || "Sem mensagem de retorno.");
+          } catch (sendErr) {
+            console.error("Erro ao enviar mensagem:", sendErr);
+          }
         }
       })
     };
@@ -66,7 +74,7 @@ client.on('message', async msg => {
     await WhatsAppController.receiveMessage(req, res);
 
   } catch (err) {
-    console.error("Erro ao processar mensagem:", err);
+    console.error("🔥 ERRO AO PROCESSAR MENSAGEM:", err);
   }
 });
 

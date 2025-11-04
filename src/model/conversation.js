@@ -2,7 +2,7 @@ const mongoose = require("mongoose");
 
 const conversationSchema = new mongoose.Schema({
   phone: { type: String, required: true },
-  message: String,
+  message: { type: String },
   sender: { type: String, enum: ["user", "bot"] },
   step: { type: String, default: "waiting_user_info" },
   userInfo: {
