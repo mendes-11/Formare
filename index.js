@@ -13,6 +13,11 @@ async function connectToDB() {
   try {
     await mongoose.connect(process.env.MONGODB_CONNECT_URI);
     console.log("Connected to MongoDB Atlas");
+
+    // Limpa a coleção User
+    const User = require("./src/model/user");
+    await User.deleteMany({});
+    console.log("Coleção de usuários limpa com sucesso!");
   } catch (error) {
     console.error("Error connecting to MongoDB Atlas:", error);
   }

@@ -1,214 +1,213 @@
-const Conversation = require("../model/conversation");
+const User = require("../model/user");
 const Quadra = require("../model/quadra");
-const Quadra = require("../model/");
 
+// Helper: valida EDV com exatamente 8 dígitos numéricos
+function isValidEdv(edv) {
+  return /^\d{8}$/.test(edv.trim());
+}
 
-const WhatsAppController = {
-  async receiveMessage(req, res) {
-    try {
-      const { phone, message } = req.body;
-      const normalizedPhone = phone.split("@")[0];
-      const msg = message.trim();
+exports.receiveMessage = async (req, res) => {
+  const { phone, message } = req.body;
+  const msg = (message || "").trim();
 
-      // Procura conversa existente no banco
-      let conversation = await Conversation.findOne({ phone: normalizedPhone });
-
-      // Se não existe, cria nova e define passo inicial
-      if (!conversation) {
-        conversation = await Conversation.create({
-          phone: normalizedPhone,
-          message: msg,
-          sender: "user",
-          step: "waiting_user_info"
-        });
-      
-        return res.status(200).json({
-          message:
-            "Olá! 😃 Antes de começarmos, por favor, envie suas informações neste formato:\n\n👉 Nome - EDV(8 números) - Setor\n\nExemplo:\nRenato - 90902712 - Manutenção"
-        });
-      }
-      
-
-      // Salva a mensagem do usuário
-      await Conversation.create({
-        phone: normalizedPhone,
-        message: msg,
-        sender: "user",
-        step: conversation.step
-      });
-
-      // Comando finalizar
-      if (msg.toLowerCase() === "finalizar") {
-        await Conversation.deleteMany({ phone: normalizedPhone });
-        return res
-          .status(200)
-          .json({ message: "✅ Atendimento finalizado. Até logo!" });
-      }
-
-      // Comando voltar
-      if (msg.toLowerCase() === "voltar") {
-        if (
-          conversation.step === "quadra_tipo" ||
-          conversation.step === "churrasqueira_local"
-        ) {
-          conversation.step = "menu_principal";
-          await conversation.save();
-          return res.status(200).json({
-            message:
-              "Voltando ao menu principal:\n\n1 - Reserva de quadra\n2 - Sorteio da churrasqueira"
-          });
-        }
-
-        return res.status(200).json({
-          message: "Você já está no início. Envie suas informações para continuar."
-        });
-      }
-
-      // ======== ETAPAS DO FLUXO ========
-
-      // Aguarda dados do usuário
-      if (conversation.step === "waiting_user_info") {
-        const parts = msg.split("-").map((p) => p.trim());
-        if (parts.length === 3 && /^\d{8}$/.test(parts[1])) {
-          const [name, edv, sector] = parts;
-          conversation.userInfo = { name, edv, sector };
-          conversation.step = "menu_principal";
-          await conversation.save();
-
-          return res.status(200).json({
-            message: `Perfeito, ${name}! 😃\nEscolha uma das opções abaixo:\n\n1 - Reserva de quadra\n2 - Sorteio da churrasqueira\n\n(Envie 'finalizar' para encerrar o atendimento)`
-          });
-        } else {
-          return res.status(200).json({
-            message:
-              "⚠️ Formato inválido. Envie no formato:\n\nNome - EDV - Setor"
-          });
-        }
-      }
-
-      // Menu principal
-      if (conversation.step === "menu_principal") {
-        if (msg === "1") {
-          conversation.step = "quadra_tipo";
-          await conversation.save();
-          return res.status(200).json({
-            message:
-              "Qual tipo de quadra você deseja reservar?\n\n1 - Sintético\n2 - Futsal\n\n(Digite 'voltar' para retornar)"
-          });
-        }
-
-        if (msg === "2") {
-          conversation.step = "churrasqueira_local";
-          await conversation.save();
-          return res.status(200).json({
-            message:
-              "Escolha a churrasqueira desejada:\n\n1 - Jardim Botânico\n2 - Passaúna\n\n(Digite 'voltar' para retornar)"
-          });
-        }
-
-        return res.status(200).json({
-          message:
-            "⚠️ Opção inválida. Escolha:\n\n1 - Reserva de quadra\n2 - Sorteio da churrasqueira"
-        });
-      }
-
-      if (conversation.step === "quadra_tipo") {
-        if (msg === "1" || msg === "2") {
-          const tipoQuadra = msg === "1" ? "Sintético" : "Futsal";
-          conversation.step = "selecionar_horario";
-          conversation.tipoQuadra = tipoQuadra;
-          await conversation.save();
-      
-          // Busca horários disponíveis
-          const quadra = await Quadra.findOne({ nome: tipoQuadra });
-          if (!quadra) {
-            return res.status(404).json({
-              message: "⚠️ Nenhuma quadra desse tipo foi encontrada."
-            });
-          }
-      
-          const horarios = await Horario.find({ quadraId: quadra._id, disponivel: true });
-      
-          if (horarios.length === 0) {
-            return res.status(200).json({
-              message: "⚠️ Nenhum horário disponível para essa quadra hoje."
-            });
-          }
-      
-          const lista = horarios.map((h, i) => `${i + 1} - ${h.hora}`).join("\n");
-      
-          return res.status(200).json({
-            message: `Horários disponíveis para a quadra ${tipoQuadra}:\n\n${lista}\n\nEscolha um número para confirmar.`
-          });
-        }
-      
-        return res.status(200).json({
-          message: "⚠️ Opção inválida. Escolha:\n\n1 - Sintético\n2 - Futsal\n\nOu digite 'voltar'."
-        });
-      }
-      
-      // Seleção do horário e criação da reserva
-      if (conversation.step === "selecionar_horario") {
-        const tipoQuadra = conversation.tipoQuadra;
-        const quadra = await Quadra.findOne({ nome: tipoQuadra });
-        const horarios = await Horario.find({ quadraId: quadra._id, disponivel: true });
-      
-        const escolha = parseInt(msg) - 1;
-        if (isNaN(escolha) || !horarios[escolha]) {
-          return res.status(200).json({
-            message: "⚠️ Escolha inválida. Envie o número do horário disponível."
-          });
-        }
-      
-        const horarioEscolhido = horarios[escolha];
-      
-        // Cria reserva
-        await Reserva.create({
-          nomeCliente: conversation.userInfo.name,
-          telefone: conversation.phone,
-          quadraId: quadra._id,
-          horarioId: horarioEscolhido._id,
-          dataReserva: new Date().toISOString().split("T")[0]
-        });
-      
-        // Marca horário como reservado
-        horarioEscolhido.disponivel = false;
-        await horarioEscolhido.save();
-      
-        conversation.step = "menu_principal";
-        await conversation.save();
-      
-        return res.status(200).json({
-          message: `✅ Reserva confirmada para ${tipoQuadra} às ${horarioEscolhido.hora}!\n\nDigite 'voltar' para o menu principal ou 'finalizar' para encerrar.`
-        });
-      }
-
-      // Churrasqueira
-      if (conversation.step === "churrasqueira_local") {
-        if (msg === "1") {
-          return res.status(200).json({
-            message:
-              "🔥 Churrasqueira do Jardim Botânico selecionada!\n\nDigite 'finalizar' para encerrar ou 'voltar' para o menu anterior."
-          });
-        }
-
-        if (msg === "2") {
-          return res.status(200).json({
-            message:
-              "🔥 Churrasqueira do Passaúna selecionada!\n\nDigite 'finalizar' para encerrar ou 'voltar' para o menu anterior."
-          });
-        }
-
-        return res.status(200).json({
-          message:
-            "⚠️ Opção inválida. Escolha:\n\n1 - Jardim Botânico\n2 - Passaúna\n\nOu digite 'voltar'."
-        });
-      }
-    } catch (error) {
-      console.error("Erro no controller:", error);
-      return res.status(500).json({ message: "Erro interno do servidor." });
-    }
+  // Busca ou cria usuário
+  let user = await User.findOne({ phone });
+  if (!user) {
+    user = await User.create({ phone, step: "pedir_nome" });
+    return res.status(200).json({
+      message: "👋 Olá! Seja bem-vindo!\nAntes de continuar, por favor, me informe seu *nome completo*:"
+    });
   }
+
+  // -------------------- CADASTRO / VALIDAÇÕES --------------------
+  if (user.step === "pedir_nome") {
+    if (!msg) return res.status(200).json({ message: "Por favor, informe seu *nome completo*:" });
+    await User.updateOne({ phone }, { nome: msg, step: "pedir_edv" });
+    return res.status(200).json({ message: `Perfeito, *${msg}*! 😄\nAgora me informe seu *EDV*:` });
+  }
+
+  if (user.step === "pedir_edv") {
+    if (!isValidEdv(msg)) return res.status(200).json({ message: "EDV inválido. O EDV deve ter exatamente *8 dígitos numéricos*. Tente novamente:" });
+    await User.updateOne({ phone }, { edv: msg, step: "pedir_setor" });
+    return res.status(200).json({ message: "Ótimo! 👍\nPor fim, digite o *setor* em que você trabalha:" });
+  }
+
+  if (user.step === "pedir_setor") {
+    if (!msg) return res.status(200).json({ message: "Por favor, informe seu *setor*:" });
+    await User.updateOne({ phone }, { setor: msg, step: "confirmar_dados" });
+    const u = await User.findOne({ phone });
+    return res.status(200).json({
+      message:
+        `🔎 *Confirme seus dados:*\n\n` +
+        `👤 Nome: *${u.nome}*\n🆔 EDV: *${u.edv}*\n🏢 Setor: *${u.setor}*\n\nDeseja confirmar?\n\n1️⃣ Sim\n2️⃣ Não`
+    });
+  }
+
+  // Confirmação de dados
+  if (user.step === "confirmar_dados") {
+    if (msg === "1") {
+      await User.updateOne({ phone }, { step: "menu" });
+      return res.status(200).json({
+        message: "✅ Informações recebidas!\n\nEscolha uma opção:\n\n1️⃣ Quadras\n2️⃣ Churrasqueiras"
+      });
+    }
+    if (msg === "2") {
+      await User.updateOne({ phone }, { step: "escolher_campo_edicao" });
+      return res.status(200).json({
+        message: "👍 OK — qual campo você quer editar?\n\n1️⃣ Nome\n2️⃣ EDV\n3️⃣ Setor\n\nEnvie o número correspondente."
+      });
+    }
+    return res.status(200).json({ message: "Digite *1* para confirmar ou *2* para editar os dados." });
+  }
+
+  // Escolher campo para editar
+  if (user.step === "escolher_campo_edicao") {
+    if (msg === "1") {
+      await User.updateOne({ phone }, { step: "editar_nome" });
+      return res.status(200).json({ message: "✏️ Ok — envie o *novo nome completo*:" });
+    }
+    if (msg === "2") {
+      await User.updateOne({ phone }, { step: "editar_edv" });
+      return res.status(200).json({ message: "✏️ Ok — envie o *novo EDV* (8 dígitos):" });
+    }
+    if (msg === "3") {
+      await User.updateOne({ phone }, { step: "editar_setor" });
+      return res.status(200).json({ message: "✏️ Ok — envie o *novo setor*:" });
+    }
+    return res.status(200).json({ message: "Opção inválida. Digite:\n1️⃣ Nome\n2️⃣ EDV\n3️⃣ Setor" });
+  }
+
+  // Edição
+  if (["editar_nome", "editar_edv", "editar_setor"].includes(user.step)) {
+    if (!msg) return res.status(200).json({ message: "Envie o novo valor:" });
+    const updates = {};
+    if (user.step === "editar_nome") updates.nome = msg;
+    if (user.step === "editar_edv") {
+      if (!isValidEdv(msg)) return res.status(200).json({ message: "EDV inválido. Deve ter 8 dígitos numéricos." });
+      updates.edv = msg;
+    }
+    if (user.step === "editar_setor") updates.setor = msg;
+    updates.step = "confirmar_dados";
+    await User.updateOne({ phone }, updates);
+    const u = await User.findOne({ phone });
+    return res.status(200).json({
+      message:
+        `🔎 *Confirme seus dados atualizados:*\n\n` +
+        `👤 Nome: *${u.nome}*\n🆔 EDV: *${u.edv}*\n🏢 Setor: *${u.setor}*\n\nDeseja confirmar?\n\n1️⃣ Sim\n2️⃣ Não`
+    });
+  }
+
+  // ====== MENU ======
+  if (user.step === "menu") {
+    if (msg === "1") {
+      const quadras = await Quadra.find();
+      if (!quadras.length) return res.status(200).json({ message: "Nenhuma quadra cadastrada 🏗️" });
+      const lista = quadras.map((q, i) => `${i + 1}. ${q.nome}`).join("\n");
+      await User.updateOne({ phone }, { step: "selecionar_quadra" });
+      return res.status(200).json({
+        message: `🏟️ *Quadras disponíveis:*\n\n${lista}\n\nDigite o número da quadra.\n\n↩️ Digite *0* para voltar.`
+      });
+    }
+    if (msg === "2") {
+      return res.status(200).json({
+        message: "🍖 Em breve será possível reservar as churrasqueiras!\n\n↩️ Digite *0* para voltar."
+      });
+    }
+    return res.status(200).json({
+      message: "Opção inválida ❌\nDigite:\n1️⃣ Quadras\n2️⃣ Churrasqueiras"
+    });
+  }
+
+  // ====== SELECIONAR QUADRA ======
+  if (user.step === "selecionar_quadra") {
+    if (msg === "0") {
+      await User.updateOne({ phone }, { step: "menu" });
+      return res.status(200).json({
+        message: "↩️ Voltando ao menu principal...\n\n1️⃣ Quadras\n2️⃣ Churrasqueiras"
+      });
+    }
+
+    if (!/^\d+$/.test(msg)) return res.status(200).json({ message: "Envie apenas o número da quadra ou *0* para voltar." });
+    const quadras = await Quadra.find();
+    const index = parseInt(msg) - 1;
+    const quadra = quadras[index];
+    if (!quadra) return res.status(200).json({ message: "❌ Número inválido. Tente novamente ou *0* para voltar." });
+
+    await User.updateOne({ phone }, { step: "selecionar_horario", selectedQuadra: quadra._id });
+    const horarios = quadra.horarios
+      .map((h, i) => `${i + 1}. ${h.horario} - ${h.reservado ? "❌ Reservado" : "✅ Disponível"}`)
+      .join("\n");
+
+    return res.status(200).json({
+      message: `🕐 *Horários da ${quadra.nome}:*\n\n${horarios}\n\nDigite o número do horário.\n\n↩️ Digite *0* para voltar.`
+    });
+  }
+
+  // ====== SELECIONAR HORÁRIO ======
+  if (user.step === "selecionar_horario") {
+    if (msg === "0") {
+      const quadras = await Quadra.find();
+      const lista = quadras.map((q, i) => `${i + 1}. ${q.nome}`).join("\n");
+      await User.updateOne({ phone }, { step: "selecionar_quadra", selectedQuadra: null });
+      return res.status(200).json({
+        message: `↩️ Voltando à lista de quadras...\n\n🏟️ *Quadras disponíveis:*\n\n${lista}\n\nDigite o número da quadra ou *0* para voltar.`
+      });
+    }
+
+    if (!/^\d+$/.test(msg)) return res.status(200).json({ message: "Envie apenas o número do horário ou *0* para voltar." });
+
+    const quadra = await Quadra.findById(user.selectedQuadra);
+    const index = parseInt(msg) - 1;
+    const horario = quadra?.horarios[index];
+    if (!horario) return res.status(200).json({ message: "❌ Número inválido. Tente novamente ou *0* para voltar." });
+    if (horario.reservado) return res.status(200).json({ message: "⚠️ Esse horário já está reservado. Escolha outro ou *0* para voltar." });
+
+    await User.updateOne({ phone }, { step: "confirmar_reserva", pendingHorarioIndex: index });
+    return res.status(200).json({
+      message: `🕐 Você selecionou o horário *${horario.horario}* na *${quadra.nome}*.\n\nDeseja confirmar a reserva?\n\n1️⃣ Sim\n2️⃣ Não\n\n↩️ Digite *0* para voltar.`
+    });
+  }
+
+  // ====== CONFIRMAR RESERVA ======
+  if (user.step === "confirmar_reserva") {
+    const quadra = await Quadra.findById(user.selectedQuadra);
+    const horario = quadra?.horarios[user.pendingHorarioIndex];
+    if (!quadra || !horario) return res.status(200).json({ message: "❌ Erro ao localizar horário. Digite *0* para voltar." });
+
+    if (msg === "0") {
+      await User.updateOne({ phone }, { step: "selecionar_horario", pendingHorarioIndex: null });
+      const horarios = quadra.horarios.map((h, i) => `${i + 1}. ${h.horario} - ${h.reservado ? "❌ Reservado" : "✅ Disponível"}`).join("\n");
+      return res.status(200).json({
+        message: `↩️ Voltando aos horários da ${quadra.nome}...\n\n${horarios}\n\nDigite o número do horário ou *0* para voltar.`
+      });
+    }
+
+    if (msg === "1") {
+      if (horario.reservado) return res.status(200).json({ message: "⚠️ Esse horário acabou de ser reservado por outra pessoa. Escolha outro." });
+      horario.reservado = true;
+      horario.reservadoPor = { nome: user.nome, edv: user.edv, setor: user.setor };
+      await quadra.save();
+      await User.updateOne({ phone }, { step: "menu", selectedQuadra: null, pendingHorarioIndex: null });
+      return res.status(200).json({
+        message: `✅ *Reserva confirmada!*\n\n📍 Quadra: *${quadra.nome}*\n🕐 Horário: *${horario.horario}*\n👤 ${user.nome} (${user.setor})\n\nDeseja fazer outra reserva?\n\n1️⃣ Quadras\n2️⃣ Churrasqueiras`
+      });
+    }
+
+    if (msg === "2") {
+      await User.updateOne({ phone }, { step: "selecionar_horario", pendingHorarioIndex: null });
+      const horarios = quadra.horarios.map((h, i) => `${i + 1}. ${h.horario} - ${h.reservado ? "❌ Reservado" : "✅ Disponível"}`).join("\n");
+      return res.status(200).json({
+        message: `🔁 Tudo bem!\n\n🕐 *Horários da ${quadra.nome}:*\n\n${horarios}\n\nDigite o número do horário que deseja reservar.`
+      });
+    }
+
+    return res.status(200).json({ message: "Digite 1️⃣ para confirmar, 2️⃣ para cancelar ou 0️⃣ para voltar." });
+  }
+
+  // ====== FALLBACK ======
+  return res.status(200).json({
+    message: "👋 Olá! Escolha uma opção:\n\n1️⃣ Quadras\n2️⃣ Churrasqueiras"
+  });
 };
 
-module.exports = WhatsAppController;
+

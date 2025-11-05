@@ -1,33 +1,30 @@
 const mongoose = require("mongoose");
 
-const user = mongoose.model(
-    "user",
-    new mongoose.Schema({
-        name: {
-            type: String,
-            requerid: true
-        },
-        edv: {
-            type: String,
-            required: true
-        },
-        password: {
-            type: String,
-            required: true
-        },
-        sector: {
-            type: String,
-            required: true
-        },
-        admIsTrue: {
-            type: Boolean,
-            required: true
-        },
-        createdAt: {
-            type: Date,
-            default: Date.now
-        }
-    })
-);
+const userSchema = new mongoose.Schema({
+  phone: { type: String, required: true },
+  nome: String,
+  edv: String,
+  setor: String,
+  step: { type: String, default: "inicio" },
+  selectedQuadra: String,
+  pendingHorarioIndex: Number 
+});
 
-module.exports = user;
+module.exports = mongoose.model("User", userSchema);
+
+
+
+// const mongoose = require("mongoose");
+
+// const userSchema = new mongoose.Schema({
+//   phone: { type: String, required: true, unique: true },
+//   nome: { type: String },
+//   edv: { type: String },
+//   setor: { type: String },
+//   etapaCadastro: { type: Number, default: 1 },
+//   ultimaQuadraSelecionada: { type: mongoose.Schema.Types.ObjectId, ref: "Quadra", default: null }
+// });
+
+// module.exports = mongoose.model("User", userSchema);
+
+
